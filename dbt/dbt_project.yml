@@ -1,0 +1,30 @@
+name: pharma_pipeline
+version: "1.0.0"
+config-version: 2
+
+profile: pharma_pipeline
+
+model-paths: ["models"]
+test-paths:  ["tests"]
+macro-paths: ["macros"]
+docs-paths:  ["docs"]
+
+target-path:   "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  pharma_pipeline:
+    bronze:
+      +materialized: view
+      +schema: bronze
+    silver:
+      +materialized: table
+      +schema: silver
+    gold:
+      +materialized: table
+      +schema: gold
+
+vars:
+  start_date: "2022-01-01"
+  end_date:   "2027-12-31"
+  fiscal_year_start_month: 10   # October fiscal year (common in pharma)
