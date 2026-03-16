@@ -1,0 +1,90 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: "Full date dimension with calendar and fiscal period attributes."
+    columns:
+      - name: date_key
+        tests: [unique, not_null]
+      - name: date_day
+        tests: [unique, not_null]
+
+  - name: dim_product
+    description: "Product dimension with therapeutic area and line classification."
+    columns:
+      - name: product_key
+        tests: [unique, not_null]
+      - name: product_id
+        tests: [unique, not_null]
+      - name: value_tier
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["High Value", "Standard", "Generic"]
+
+  - name: dim_customer
+    description: "Customer account dimension with segment and tier."
+    columns:
+      - name: customer_key
+        tests: [unique, not_null]
+      - name: customer_id
+        tests: [unique, not_null]
+
+  - name: dim_rep
+    description: "Sales representative dimension with quota information."
+    columns:
+      - name: rep_key
+        tests: [unique, not_null]
+      - name: rep_id
+        tests: [unique, not_null]
+      - name: annual_quota
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+                strictly: true
+
+  - name: dim_territory
+    description: "Sales territory reference dimension."
+    columns:
+      - name: territory_key
+        tests: [unique, not_null]
+      - name: territory_id
+        tests: [unique, not_null]
+
+  - name: fact_sales
+    description: "Core sales fact table (one row per order with dimension keys and calculated measures)."
+    columns:
+      - name: sales_key
+        tests: [unique, not_null]
+      - name: order_id
+        tests: [unique, not_null]
+      - name: net_revenue
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 0
+                strictly: true
+      - name: units_sold
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              arguments:
+                min_value: 1
+                strictly: false
+
+  - name: fact_cogs
+    description: "Monthly COGS fact (standard vs actual cost per product per month)."
+    columns:
+      - name: cogs_key
+        tests: [unique, not_null]
+
+  - name: fact_mrr_monthly
+    description: "MRR events fact (new, expansion, churn, reactivation per customer per month)."
+    columns:
+      - name: mrr_key
+        tests: [unique, not_null]
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["new", "expansion", "contraction", "churn", "reactivation"]
