@@ -1,0 +1,110 @@
+version: 2
+
+models:
+  - name: mart_sales_performance
+    description: >
+      Power BI-ready sales performance mart. One row per order, fully denormalized
+      with all dimension attributes, measures, and a is_forecast flag for
+      combining with forecast rows in visuals.
+    columns:
+      - name: order_id
+        description: "Unique order identifier."
+        tests: [not_null]
+      - name: order_date
+        description: "Date the order was placed."
+        tests: [not_null]
+      - name: net_revenue
+        description: "Net revenue after discounts."
+      - name: final_net_revenue
+        description: "Net revenue minus returned revenue."
+      - name: daily_quota_attainment_pct
+        description: "Rep's net revenue on this order as a % of their daily quota."
+      - name: is_forecast
+        description: "Always FALSE in actuals. Set to TRUE for forecast rows."
+
+  - name: mart_cogs_margin
+    description: >
+      Finance dashboard mart. One row per product per month with standard cost,
+      actual cost, gross margin %, and rolling/MoM comparisons.
+    columns:
+      - name: cost_month
+        description: "First day of the month this cost record covers."
+        tests: [not_null]
+      - name: gross_margin_pct
+        description: "Gross margin as a percentage of net revenue."
+      - name: rolling_3m_margin_pct
+        description: "3-month rolling average gross margin % for this product."
+      - name: margin_mom_delta
+        description: "Month-over-month change in gross margin %."
+
+  - name: mart_customer_health
+    description: >
+      Customer 360 mart. One row per customer per month with order activity,
+      MRR movement, churn flag, and lifetime value estimate.
+    columns:
+      - name: customer_id
+        description: "Customer UUID."
+        tests: [not_null]
+      - name: lifetime_value
+        description: "Total net revenue from this customer across all time."
+      - name: days_since_last_order
+        description: "Days elapsed since the customer's most recent order."
+      - name: is_churned
+        description: "TRUE if a churn MRR event occurred this month."
+
+  - name: mart_mrr_waterfall
+    description: >
+      Classic SaaS MRR waterfall applied to pharma accounts. Monthly aggregate
+      showing new, expansion, churned, and reactivated MRR with cumulative totals
+      and churn rate.
+    columns:
+      - name: event_month
+        description: "First day of the reporting month."
+        tests: [unique, not_null]
+      - name: net_new_mrr
+        description: "New + expansion + reactivation MRR minus churn and contraction."
+      - name: cumulative_mrr
+        description: "Running total of net new MRR from the start of history."
+      - name: churn_rate_pct
+        description: "Churned customers / prior month total active customers x 100."
+
+  - name: mart_time_intelligence
+    description: >
+      Pre-calculated time intelligence by product_line and therapeutic_area.
+      MTD, QTD, YTD, rolling 90d and 365d revenue - computed in SQL so Power BI
+      Direct Query does not need DAX measures for these.
+    columns:
+      - name: order_date
+        tests: [not_null]
+      - name: mtd_revenue
+        description: "Month-to-date revenue for this product_line x therapeutic_area."
+      - name: qtd_revenue
+        description: "Quarter-to-date revenue."
+      - name: ytd_revenue
+        description: "Year-to-date revenue."
+      - name: rolling_90d_revenue
+        description: "Rolling 90-day revenue."
+      - name: rolling_365d_revenue
+        description: "Rolling 365-day revenue."
+      - name: yoy_growth_pct
+        description: "Year-over-year daily revenue growth %."
+
+  - name: mart_forecast
+    description: >
+      Combined actuals + forecast table. Actuals come from dbt, forecast rows
+      are appended by the Python forecasting module. Use is_forecast to split
+      actuals vs projections in Power BI.
+    columns:
+      - name: revenue_month
+        description: "First day of the month."
+        tests: [not_null]
+      - name: product_line
+        description: "Product line for this forecast group."
+      - name: revenue
+        description: "Actual or forecast monthly revenue."
+      - name: is_forecast
+        description: "TRUE for forecast rows written by the Python model."
+      - name: forecast_lower_bound
+        description: "95% confidence interval lower bound (forecast rows only)."
+      - name: forecast_upper_bound
+        description: "95% confidence interval upper bound (forecast rows only)."
