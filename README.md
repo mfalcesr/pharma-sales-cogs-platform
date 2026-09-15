@@ -1,6 +1,10 @@
 # Pharma Sales & COGS Intelligence Platform
 
-A production-grade data engineering portfolio project that simulates a pharmaceutical company's end-to-end sales and cost-of-goods analytics pipeline. Synthetic data covers four years of transactional history across 20 drug products, 150 customer accounts, 30 sales reps, and 10 territories, loaded into PostgreSQL, transformed through a medallion architecture with dbt, forecast with Holt-Winters, and served to Power BI.
+A data engineering portfolio project that models a pharmaceutical company's end-to-end sales and cost-of-goods analytics pipeline. Synthetic data covers four years of transactional history across 20 drug products, 150 customer accounts, 30 sales reps, and 10 territories, loaded into PostgreSQL, transformed through a medallion architecture with dbt, forecast with Holt-Winters, and served to Power BI.
+
+[![CI](https://github.com/mfalcesr/pharma-sales-cogs-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/mfalcesr/pharma-sales-cogs-platform/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ---
 
@@ -126,10 +130,20 @@ The gold marts are connected via DirectQuery rather than imported and cached in 
 - Python 3.11+
 - Power BI Desktop (optional, for visualization)
 
-### 1. Start PostgreSQL
+### 1. Create your .env
 
 ```bash
-docker-compose up -d
+cp .env.example .env
+```
+
+`docker-compose.yml` reads `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` with no
+fallback values, so the container will not start without this file. Change the placeholder
+password before running anything you care about.
+
+### 2. Start PostgreSQL
+
+```bash
+docker compose up -d
 ```
 
 Postgres will initialize with `init_schemas.sql` automatically on first run. Verify with:
@@ -138,7 +152,7 @@ Postgres will initialize with `init_schemas.sql` automatically on first run. Ver
 docker exec -it pharma_postgres psql -U pharma_user -d pharma_db -c "\dn"
 ```
 
-### 2. Install Python dependencies
+### 3. Install Python dependencies
 
 ```bash
 python -m venv .venv
@@ -150,7 +164,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Run the full pipeline
+### 4. Run the full pipeline
 
 ```bash
 bash cron_runner.sh full
@@ -158,7 +172,7 @@ bash cron_runner.sh full
 
 This executes in sequence: generate → load → dbt deps → dbt run → dbt test → forecast → export.
 
-### 4. Run only the data generator (standalone)
+### 5. Run only the data generator (standalone)
 
 ```bash
 # Full historical backfill (2022-01-01 to 2025-12-31)
@@ -173,6 +187,57 @@ python -m generator.run_generator --mode=daily --date 2024-06-15
 
 ---
 
+## What a Run Produces
+
+`bash cron_runner.sh full` chains generate → load → dbt deps → dbt run → dbt test → forecast → export,
+appending one timestamped line per step to `logs/YYYY-MM-DD.log` and stopping at the first
+non-zero exit:
+
+```
+[YYYY-MM-DD HH:MM:SS] --- START: generator ---
+[YYYY-MM-DD HH:MM:SS] --- OK: generator ---
+[YYYY-MM-DD HH:MM:SS] --- START: loader ---
+[YYYY-MM-DD HH:MM:SS] --- OK: loader ---
+[YYYY-MM-DD HH:MM:SS] --- START: dbt-run ---
+```
+
+The generator and loader report row counts per table as they go. The static counts are fixed
+constants in `generator/config.py`, so they are identical on every machine:
+
+```
+Generating static reference data...
+  Wrote 10 rows → data/raw/static/territories.csv
+  Wrote 20 rows → data/raw/static/products.csv
+  Wrote 150 rows → data/raw/static/customers.csv
+  Wrote 30 rows → data/raw/static/reps.csv
+
+Generating daily orders: 2022-01-01 → 2025-12-31
+
+=== Full load: static reference data ===
+  Loaded 10 rows -> raw.territories
+  Loaded 20 rows -> raw.products
+  Loaded 150 rows -> raw.customers
+  Loaded 30 rows -> raw.reps
+```
+
+A completed run leaves:
+
+```
+data/
+├── raw/static/          # the four reference CSVs above
+├── raw/YYYY-MM-DD/      # one directory per simulated day: orders, costs, returns, mrr_events
+└── exports/YYYY-MM-DD/  # Parquet snapshot of the gold marts
+logs/YYYY-MM-DD.log     # one line per pipeline step
+```
+
+Confirm the warehouse built by listing the gold marts:
+
+```bash
+docker exec -it pharma_postgres psql -U pharma_user -d pharma_db -c "\dt gold.*"
+```
+
+---
+
 ## Data Model
 
 ### Raw Schema (source of truth, loaded from CSV)
@@ -183,9 +248,9 @@ python -m generator.run_generator --mode=daily --date 2024-06-15
 | `raw.products` | 20 | Drug products with therapeutic area and cost |
 | `raw.customers` | 150 | Pharma customer accounts (hospitals, pharmacies, clinics) |
 | `raw.reps` | 30 | Sales representatives with quotas |
-| `raw.orders` | ~50k/year | Daily transactional orders with pricing |
+| `raw.orders` | ~50,000/year | Daily transactional orders with pricing |
 | `raw.costs` | ~240/year | Monthly standard vs. actual COGS per product |
-| `raw.returns` | ~1.5k/year | Return events linked to orders |
+| `raw.returns` | ~1,500/year | Return events linked to orders |
 | `raw.mrr_events` | ~variable | Monthly recurring revenue events (new/churn/expansion) |
 
 ### Bronze Schema (dbt, incremental)
@@ -246,7 +311,8 @@ The forecasting module (`forecasting/run_forecast.py`) uses **Holt-Winters Expon
 5. Navigate to the **gold** schema and import marts as separate tables
 6. Build relationships on `product_id`, `customer_id`, `rep_id`, `territory_id`, `date_id`
 
-Credentials: user `pharma_user`, password `pharma_pass_2024` (from `.env`).
+Credentials: the `POSTGRES_USER` and `POSTGRES_PASSWORD` values from your `.env` — see
+[`.env.example`](.env.example) for the full list of variables.
 
 ---
 
@@ -331,7 +397,7 @@ Key test modules:
 
 ```
 .
-├── .env                        # Environment variables (not committed)
+├── .env.example                # Environment template (copy to .env, which is gitignored)
 ├── docker-compose.yml          # PostgreSQL container
 ├── init_schemas.sql            # Schema + table DDL
 ├── requirements.txt            # Python dependencies
@@ -356,3 +422,9 @@ Key test modules:
 │   └── exports/                # Parquet output (gitignored except .gitkeep)
 └── logs/                       # Pipeline run logs (gitignored)
 ```
+
+---
+
+## License
+
+MIT, see [LICENSE](LICENSE).
