@@ -26,70 +26,71 @@ A data engineering portfolio project that models a pharmaceutical company's end-
 ## Architecture
 
 ```
-                     ┌─────────────────────────────────┐
-                     │        Data Generator            │
-                     │  (Python / Faker / NumPy)        │
-                     │  Products, Customers, Reps,      │
-                     │  Orders, Costs, Returns, MRR     │
-                     └────────────────┬────────────────┘
-                                      │ CSV files
-                                      ▼
-                          data/raw/static/   (reference)
-                          data/raw/YYYY-MM-DD/ (daily)
-                                      │
-                     ┌────────────────▼────────────────┐
-                     │          Loader Module           │
-                     │   (psycopg2 / SQLAlchemy)        │
-                     │   COPY CSV → raw schema          │
-                     └────────────────┬────────────────┘
-                                      │
-                     ┌────────────────▼────────────────┐
-                     │       PostgreSQL raw schema      │
-                     │  territories, products,          │
-                     │  customers, reps, orders,        │
-                     │  costs, returns, mrr_events      │
-                     └────────────────┬────────────────┘
-                                      │ dbt run
-                          ┌───────────▼───────────┐
-                          │    bronze schema       │
-                          │  Type-cast, dedupe,    │
-                          │  _loaded_at watermark  │
-                          └───────────┬───────────┘
-                                      │ dbt run
-                          ┌───────────▼───────────┐
-                          │    silver schema       │
-                          │  dim_product           │
-                          │  dim_customer          │
-                          │  dim_rep               │
-                          │  dim_territory         │
-                          │  dim_date              │
-                          │  fct_orders            │
-                          │  fct_costs             │
-                          │  fct_returns           │
-                          │  fct_mrr               │
-                          └───────────┬───────────┘
-                                      │ dbt run
-                          ┌───────────▼───────────┐
-                          │     gold schema        │
-                          │  mart_sales_summary    │
-                          │  mart_cogs_margin      │
-                          │  mart_rep_performance  │
-                          │  mart_mrr_waterfall    │
-                          │  mart_territory_health │
-                          └─────────┬──────┬──────┘
-                                    │      │
-               ┌────────────────────▼─┐  ┌─▼──────────────────┐
-               │  Power BI Desktop    │  │  Parquet Export     │
-               │  Direct Query        │  │  data/exports/      │
-               │  gold schema         │  │  (PyArrow)          │
-               └──────────────────────┘  └────────────────────┘
-                                    │
-               ┌────────────────────▼──────────────┐
-               │  Forecasting Module                │
-               │  Holt-Winters ETS (statsmodels)    │
-               │  6-month horizon, 95% CI bands     │
-               │  → gold.mart_forecast              │
-               └───────────────────────────────────┘
+                     ┌───────────────────────────────────┐
+                     │           Data Generator          │
+                     │  (Python / Faker / NumPy)         │
+                     │  Products, Customers, Reps,       │
+                     │  Orders, Costs, Returns, MRR      │
+                     └───────────────────────────────────┘
+                                       │ CSV files
+                                       ▼
+                          data/raw/static/      (reference)
+                          data/raw/YYYY-MM-DD/  (daily)
+                                       │
+                     ┌─────────────────▼─────────────────┐
+                     │           Loader Module           │
+                     │  (psycopg2 / SQLAlchemy)          │
+                     │  COPY CSV → raw schema            │
+                     └───────────────────────────────────┘
+                                       │
+                     ┌─────────────────▼─────────────────┐
+                     │       PostgreSQL raw schema       │
+                     │  territories, products,           │
+                     │  customers, reps, orders,         │
+                     │  costs, returns, mrr_events       │
+                     └───────────────────────────────────┘
+                                       │ dbt run
+                     ┌─────────────────▼─────────────────┐
+                     │           bronze schema           │
+                     │  Type-cast, dedupe,               │
+                     │  _loaded_at watermark             │
+                     └───────────────────────────────────┘
+                                       │ dbt run
+                     ┌─────────────────▼─────────────────┐
+                     │           silver schema           │
+                     │  dim_product                      │
+                     │  dim_customer                     │
+                     │  dim_rep                          │
+                     │  dim_territory                    │
+                     │  dim_date                         │
+                     │  fact_sales                       │
+                     │  fact_cogs                        │
+                     │  fact_mrr_monthly                 │
+                     └───────────────────────────────────┘
+                                       │ dbt run
+                     ┌─────────────────▼─────────────────┐
+                     │            gold schema            │
+                     │  mart_sales_performance           │
+                     │  mart_cogs_margin                 │
+                     │  mart_customer_health             │
+                     │  mart_mrr_waterfall               │
+                     │  mart_time_intelligence           │
+                     │  mart_forecast                    │
+                     └───────────────────────────────────┘
+                                       │
+                     ┌─────────────────▼─────────────────┐
+                     │         Forecasting Module        │
+                     │  Holt-Winters ETS (statsmodels)   │
+                     │  6-month horizon, 95% CI bands    │
+                     │  reads actuals from and writes    │
+                     │  forecasts to gold.mart_forecast  │
+                     └────────┬───────────────────────┬──┘
+                              │                       │
+                   ┌──────────▼─────────┐  ┌──────────▼─────────┐
+                   │  Power BI Desktop  │  │   Parquet Export   │
+                   │  DirectQuery       │  │  data/exports/     │
+                   │  gold schema       │  │  (PyArrow)         │
+                   └────────────────────┘  └────────────────────┘
 ```
 
 ---
@@ -273,21 +274,23 @@ Mirrors raw tables with casting, null handling, and `_loaded_at` watermarking. N
 
 | Model | Grain | Key metrics |
 |---|---|---|
-| `fct_orders` | 1 row per order line | gross_amount, net_amount, discount_pct, quantity |
-| `fct_costs` | 1 row per product-month | standard_cost, actual_cost, variance_pct |
-| `fct_returns` | 1 row per return | quantity_returned, return_reason |
-| `fct_mrr` | 1 row per customer-product-month event | mrr_amount, event_type |
+| `fact_sales` | 1 row per order | units_sold, units_returned, net_units, net_revenue, discount_amount, final_net_revenue, daily_quota_attainment_pct |
+| `fact_cogs` | 1 row per product-month | standard_cost, actual_cost, cost_variance_pct, units_sold, net_revenue, total_cogs, gross_profit, gross_margin_pct |
+| `fact_mrr_monthly` | 1 row per MRR event (customer-product-month) | mrr_amount, mrr_added, mrr_lost, and the is_new / is_expansion / is_contraction / is_churned / is_reactivated flags |
+
+Returns do not get their own fact: `stg_returns` is aggregated per order and folded into
+`fact_sales` as `units_returned` and `returned_revenue`, so every order carries its net position.
 
 ### Gold Schema (dbt, business-ready marts)
 
 | Mart | Description |
 |---|---|
-| `mart_sales_summary` | Revenue by product, territory, period with YoY and MoM comparisons |
-| `mart_cogs_margin` | Gross margin by product line and therapeutic area |
-| `mart_rep_performance` | Attainment vs. quota, rank within region |
-| `mart_mrr_waterfall` | MRR bridge: new + expansion − churn + reactivation |
-| `mart_territory_health` | Territory scorecard: revenue, customers, rep count, avg discount |
-| `mart_forecast` | 6-month revenue forecast with 95% confidence intervals |
+| `mart_sales_performance` | Order-grain sales enriched with product, customer, rep and date attributes, plus quota attainment |
+| `mart_cogs_margin` | Product-month standard vs. actual cost, gross margin, and a 3-month rolling average margin |
+| `mart_customer_health` | Customer-month order activity, MRR movement, lifetime value and days since last order |
+| `mart_mrr_waterfall` | Monthly MRR bridge: new + expansion + reactivation − contraction − churn |
+| `mart_time_intelligence` | Daily revenue by product line with MTD / QTD / YTD, rolling windows and YoY growth |
+| `mart_forecast` | Monthly revenue by product line and therapeutic area. dbt seeds the actuals; the forecasting module appends forecast rows with confidence bands |
 
 ---
 
@@ -295,7 +298,7 @@ Mirrors raw tables with casting, null handling, and `_loaded_at` watermarking. N
 
 The forecasting module (`forecasting/run_forecast.py`) uses **Holt-Winters Exponential Smoothing** (additive trend, additive seasonality, period=12 months) via `statsmodels.tsa.holtwinters.ExponentialSmoothing`.
 
-- **Input**: monthly net revenue from `gold.mart_sales_summary` (trailing 36 months minimum)
+- **Input**: monthly net revenue from `gold.mart_forecast`, actual rows only (trailing 36 months minimum)
 - **Horizon**: 6 months forward
 - **Output**: point forecast + 95% confidence bands written to `gold.mart_forecast`
 - **Granularity**: run at total company level and repeated per therapeutic area
@@ -386,10 +389,9 @@ Key test modules:
 
 | Test file | Coverage |
 |---|---|
-| `tests/test_generators.py` | Row counts, schema completeness, value ranges |
-| `tests/test_costs.py` | Cost variance bounds, MRR event type validity |
-| `tests/test_orders.py` | Price calculations, discount bounds, return rate |
-| `tests/test_loader.py` | Postgres connectivity, COPY idempotency |
+| `tests/test_generator.py` | Product, territory, rep and customer generation; order and cost row shapes |
+| `tests/test_forecast_model.py` | Forecast shape, future-dated rows, non-negative revenue, confidence-bound ordering, short-series fallback |
+| `tests/test_loader.py` | Environment-based connection config, graceful skip on missing CSVs |
 
 ---
 
